@@ -11,21 +11,18 @@ use App\Services\Summarization\SummaryResult;
 use App\Services\Transcription\TranscriberInterface;
 use App\Services\Transcription\TranscriptionResult;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Queue;
 use RuntimeException;
 use Tests\TestCase;
 
-/**
- * These tests bind the *interfaces* to lightweight test doubles rather than
- * the real fake/OpenAI/Anthropic drivers, so the pipeline's own logic
- * (status transitions, chaining, failure handling) is verified in
- * isolation from any particular provider's behaviour.
- */
 class RecordingProcessingPipelineTest extends TestCase
 {
     use RefreshDatabase;
 
     public function test_transcribing_a_recording_marks_it_transcribed_and_queues_summarization(): void
     {
+        Queue::fake();
+
         $this->app->bind(TranscriberInterface::class, fn () => new class implements TranscriberInterface
         {
             public function transcribe(Recording $recording): TranscriptionResult
@@ -42,6 +39,7 @@ class RecordingProcessingPipelineTest extends TestCase
 
         $this->assertSame(RecordingStatus::Transcribed, $recording->status);
         $this->assertSame('Hello, this is the transcript.', $recording->transcript);
+        Queue::assertPushed(SummarizeRecording::class, fn ($job) => $job->recording->is($recording));
     }
 
     public function test_a_failed_transcription_marks_the_recording_failed(): void
